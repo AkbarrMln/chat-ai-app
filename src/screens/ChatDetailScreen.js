@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import {
     View,
     Text,
@@ -8,20 +8,33 @@ import {
     StyleSheet,
     KeyboardAvoidingView,
     Platform,
+    Alert,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import Animated, { FadeInRight, FadeInLeft, Layout, FadeIn } from 'react-native-reanimated';
 import * as Haptics from 'expo-haptics';
 import { useTheme } from '../context/ThemeContext';
-import { CHAT_MESSAGES } from '../data/mockData';
+import { sendMessageToAI } from '../services/api';
 
 export default function ChatDetailScreen({ route }) {
-    const { conversationId } = route.params;
+    const { conversationId, title } = route.params;
     const { colors } = useTheme();
-    const [messages, setMessages] = useState(CHAT_MESSAGES[conversationId] || []);
+    const [messages, setMessages] = useState([]);
     const [inputText, setInputText] = useState('');
     const [isTyping, setIsTyping] = useState(false);
+    const [isError, setIsError] = useState(false);
     const flatListRef = useRef(null);
+
+    // Add welcome message on first load
+    useEffect(() => {
+        const welcomeMessage = {
+            id: 'welcome',
+            text: `Halo! 👋 Saya Akbar AI, asisten virtual Anda. Ada yang bisa saya bantu hari ini?`,
+            isUser: false,
+            timestamp: new Date(),
+        };
+        setMessages([welcomeMessage]);
+    }, []);
 
     const formatTime = (date) => {
         return date.toLocaleTimeString('en-US', {
@@ -31,44 +44,62 @@ export default function ChatDetailScreen({ route }) {
         });
     };
 
-    const handleSend = () => {
+    const handleSend = async () => {
         if (!inputText.trim()) return;
 
         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+        setIsError(false);
 
-        const newMessage = {
+        const userMessage = {
             id: Date.now().toString(),
-            text: inputText,
+            text: inputText.trim(),
             isUser: true,
             timestamp: new Date(),
         };
 
-        setMessages((prev) => [...prev, newMessage]);
+        // Add user message to chat
+        const updatedMessages = [...messages, userMessage];
+        setMessages(updatedMessages);
         setInputText('');
         setIsTyping(true);
 
-        setTimeout(() => {
+        // Call AI API
+        const result = await sendMessageToAI(inputText.trim(), updatedMessages);
+
+        setIsTyping(false);
+
+        if (result.success) {
             Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-            setIsTyping(false);
             const aiResponse = {
                 id: (Date.now() + 1).toString(),
-                text: getAIResponse(),
+                text: result.response,
                 isUser: false,
                 timestamp: new Date(),
             };
             setMessages((prev) => [...prev, aiResponse]);
-        }, 1800);
+        } else {
+            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+            setIsError(true);
+            const errorMessage = {
+                id: (Date.now() + 1).toString(),
+                text: `⚠️ ${result.error}`,
+                isUser: false,
+                timestamp: new Date(),
+                isError: true,
+            };
+            setMessages((prev) => [...prev, errorMessage]);
+        }
     };
 
-    const getAIResponse = () => {
-        const responses = [
-            "I'm here to help! Let me process that for you. 🚀",
-            "Sokka AI has found something interesting... ✨",
-            "Great question! Here's a quick breakdown.",
-            "That sounds fascinating! Let's explore it further.",
-            "I'm on it! Here's what you need to know. 🎯",
-        ];
-        return responses[Math.floor(Math.random() * responses.length)];
+    const handleRetry = () => {
+        // Remove last error message and retry
+        const lastUserMessageIndex = messages.map(m => m.isUser).lastIndexOf(true);
+        if (lastUserMessageIndex >= 0) {
+            const lastUserMessage = messages[lastUserMessageIndex];
+            // Remove error message
+            setMessages(prev => prev.filter(m => !m.isError));
+            setInputText(lastUserMessage.text);
+        }
     };
 
     const renderMessage = ({ item, index }) => {
@@ -86,8 +117,8 @@ export default function ChatDetailScreen({ route }) {
                 ]}
             >
                 {!item.isUser && isFirst && (
-                    <View style={[styles.aiAvatar, { backgroundColor: route.params?.avatarColor || colors.primary }]}>
-                        <Text style={styles.aiInitials}>{route.params?.avatar || 'AI'}</Text>
+                    <View style={[styles.aiAvatar, { backgroundColor: item.isError ? '#EF4444' : (route.params?.avatarColor || colors.primary) }]}>
+                        <Text style={styles.aiInitials}>{item.isError ? '!' : (route.params?.avatar || 'AI')}</Text>
                     </View>
                 )}
 
@@ -95,9 +126,13 @@ export default function ChatDetailScreen({ route }) {
                     styles.bubble,
                     item.isUser
                         ? { backgroundColor: colors.messageUser, borderBottomRightRadius: isLast ? 8 : 32 }
-                        : { backgroundColor: colors.messageAI, borderBottomLeftRadius: isLast ? 8 : 32, marginLeft: isFirst ? 0 : 48 },
+                        : {
+                            backgroundColor: item.isError ? '#FEE2E2' : colors.messageAI,
+                            borderBottomLeftRadius: isLast ? 8 : 32,
+                            marginLeft: isFirst ? 0 : 48
+                        },
                 ]}>
-                    <Text style={[styles.bubbleText, { color: item.isUser ? colors.messageUserText : colors.messageAIText }]}>
+                    <Text style={[styles.bubbleText, { color: item.isUser ? colors.messageUserText : (item.isError ? '#991B1B' : colors.messageAIText) }]}>
                         {item.text}
                     </Text>
                     <View style={styles.bubbleFooter}>
@@ -109,6 +144,15 @@ export default function ChatDetailScreen({ route }) {
                         )}
                     </View>
                 </View>
+
+                {item.isError && (
+                    <TouchableOpacity
+                        style={styles.retryButton}
+                        onPress={handleRetry}
+                    >
+                        <Ionicons name="refresh" size={20} color={colors.primary} />
+                    </TouchableOpacity>
+                )}
             </Animated.View>
         );
     };
@@ -127,9 +171,15 @@ export default function ChatDetailScreen({ route }) {
                 <View style={[styles.typingBubble, { backgroundColor: colors.messageAI }]}>
                     <View style={styles.typingDots}>
                         {[0, 1, 2].map((i) => (
-                            <View key={i} style={[styles.dot, { backgroundColor: colors.primary }]} />
+                            <Animated.View
+                                key={i}
+                                style={[styles.dot, { backgroundColor: colors.primary }]}
+                            />
                         ))}
                     </View>
+                    <Text style={[styles.typingText, { color: colors.textTertiary }]}>
+                        Akbar AI sedang mengetik...
+                    </Text>
                 </View>
             </Animated.View>
         );
@@ -156,19 +206,27 @@ export default function ChatDetailScreen({ route }) {
                 <View style={[styles.inputWrapper, { backgroundColor: colors.surfaceSecondary, borderColor: colors.border }]}>
                     <TextInput
                         style={[styles.input, { color: colors.text }]}
-                        placeholder="Ask Sokka AI anything..."
+                        placeholder="Tanya Akbar AI apa saja..."
                         placeholderTextColor={colors.textTertiary}
                         value={inputText}
                         onChangeText={setInputText}
                         multiline
                         maxLength={1000}
+                        editable={!isTyping}
                     />
                     <TouchableOpacity
-                        style={[styles.sendBtn, { backgroundColor: inputText.trim() ? colors.primary : colors.textTertiary + '20' }]}
+                        style={[
+                            styles.sendBtn,
+                            { backgroundColor: inputText.trim() && !isTyping ? colors.primary : colors.textTertiary + '20' }
+                        ]}
                         onPress={handleSend}
-                        disabled={!inputText.trim()}
+                        disabled={!inputText.trim() || isTyping}
                     >
-                        <Ionicons name="arrow-up" size={24} color={inputText.trim() ? '#FFF' : colors.textTertiary} />
+                        {isTyping ? (
+                            <Ionicons name="hourglass-outline" size={24} color={colors.textTertiary} />
+                        ) : (
+                            <Ionicons name="arrow-up" size={24} color={inputText.trim() ? '#FFF' : colors.textTertiary} />
+                        )}
                     </TouchableOpacity>
                 </View>
             </View>
@@ -195,7 +253,7 @@ const styles = StyleSheet.create({
         maxWidth: '82%',
         paddingHorizontal: 20,
         paddingVertical: 16,
-        borderRadius: 32, // Sokka Style Pill Radius
+        borderRadius: 32,
     },
     bubbleText: { fontSize: 16, lineHeight: 24, fontWeight: '500' },
     bubbleFooter: { flexDirection: 'row', alignItems: 'center', marginTop: 8, alignSelf: 'flex-end' },
@@ -208,6 +266,15 @@ const styles = StyleSheet.create({
     },
     typingDots: { flexDirection: 'row', gap: 6 },
     dot: { width: 8, height: 8, borderRadius: 4 },
+    typingText: {
+        fontSize: 12,
+        marginTop: 8,
+        fontStyle: 'italic'
+    },
+    retryButton: {
+        marginLeft: 8,
+        padding: 8,
+    },
     inputArea: {
         paddingHorizontal: 20,
         paddingTop: 12,

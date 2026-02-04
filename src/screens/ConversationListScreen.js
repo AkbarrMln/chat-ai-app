@@ -196,10 +196,18 @@ export default function ConversationListScreen({ navigation }) {
 
             <TouchableOpacity
                 style={[styles.fab, { backgroundColor: colors.primary }]}
-                onPress={() => alert('New chat!')}
+                onPress={() => {
+                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                    navigation.navigate('ChatDetail', {
+                        conversationId: `new-${Date.now()}`,
+                        title: 'Akbar AI',
+                        avatar: '🤖',
+                        avatarColor: colors.primary
+                    });
+                }}
                 activeOpacity={0.8}
             >
-                <Ionicons name="chatbubble-ellipses-outline" size={26} color="#FFF" />
+                <Ionicons name="add" size={28} color="#FFF" />
             </TouchableOpacity>
         </View>
     );
