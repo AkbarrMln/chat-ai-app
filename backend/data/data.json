@@ -1,5 +1,14 @@
 {
-  "userSettings": {},
+  "userSettings": {
+    "device_1770357772803_2u6m8zyk3": {
+      "enabled": false,
+      "time": "07:00",
+      "topic": "Teknologi",
+      "customPrompt": "Fokus Berita AI Indonesia",
+      "timezone": "Asia/Bangkok",
+      "updatedAt": "2026-02-07T04:30:39.845Z"
+    }
+  },
   "digestHistory": {
     "test-device": [
       {

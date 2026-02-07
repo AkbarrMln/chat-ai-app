@@ -7,7 +7,6 @@ import {
     StyleSheet,
     Switch,
     TextInput,
-    Alert,
     ActivityIndicator,
     Platform,
     Modal,
@@ -15,6 +14,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import Animated, { FadeInDown, FadeIn } from 'react-native-reanimated';
 import { useTheme } from '../context/ThemeContext';
+import { useToast } from '../components/Toast';
 import {
     getDigestSettings,
     saveDigestSettings,
@@ -27,27 +27,6 @@ import {
 } from '../services/notificationService';
 
 const TOPICS = ['Teknologi', 'Bisnis', 'Olahraga', 'Hiburan', 'Politik', 'Kesehatan', 'Gaming'];
-
-// Cross-platform alert function (works on web too)
-const showAlert = (title, message, buttons = []) => {
-    if (Platform.OS === 'web') {
-        // For web, use window.alert or confirm
-        if (buttons.length > 1) {
-            const result = window.confirm(`${title}\n\n${message}`);
-            if (result && buttons[0]?.onPress) {
-                buttons[0].onPress();
-            }
-        } else {
-            window.alert(`${title}\n\n${message}`);
-            if (buttons[0]?.onPress) {
-                buttons[0].onPress();
-            }
-        }
-    } else {
-        // For native, use Alert.alert
-        showAlert(title, message, buttons);
-    }
-};
 
 // Generate hour and minute options
 const HOURS = Array.from({ length: 24 }, (_, i) => i);
@@ -154,6 +133,7 @@ function CustomTimePicker({ visible, onClose, onSelect, initialHour, initialMinu
 
 export default function DigestSettingsScreen({ navigation }) {
     const { colors } = useTheme();
+    const { showToast } = useToast();
 
     // State
     const [loading, setLoading] = useState(true);
@@ -214,10 +194,7 @@ export default function DigestSettingsScreen({ navigation }) {
             if (enabled && !pushToken) {
                 const token = await registerForPushNotifications();
                 if (!token) {
-                    showAlert(
-                        'Notifikasi Diperlukan',
-                        'Aktifkan izin notifikasi untuk menerima Daily Digest'
-                    );
+                    showToast('warning', 'Notifikasi Diperlukan', 'Aktifkan izin notifikasi untuk menerima Daily Digest');
                     setEnabled(false);
                     setSaving(false);
                     return;
@@ -237,12 +214,12 @@ export default function DigestSettingsScreen({ navigation }) {
             });
 
             if (result.success) {
-                showAlert('Berhasil', 'Pengaturan digest berhasil disimpan! 🎉');
+                showToast('success', 'Berhasil! 🎉', 'Pengaturan digest berhasil disimpan');
             } else {
                 throw new Error(result.error);
             }
         } catch (error) {
-            showAlert('Error', 'Gagal menyimpan pengaturan: ' + error.message);
+            showToast('error', 'Error', 'Gagal menyimpan: ' + error.message);
         } finally {
             setSaving(false);
         }
@@ -261,19 +238,14 @@ export default function DigestSettingsScreen({ navigation }) {
             const result = await testDigest(deviceId, selectedTopic, customPrompt, token);
 
             if (result.success) {
-                showAlert(
-                    '🧪 Test Digest Berhasil!',
-                    'Digest telah dibuat. Cek History untuk melihat hasilnya.',
-                    [
-                        { text: 'Lihat History', onPress: () => navigation.navigate('DigestHistory') },
-                        { text: 'OK' }
-                    ]
-                );
+                showToast('success', '🧪 Test Berhasil!', 'Digest dibuat. Tap untuk lihat history.');
+                // Navigate to history after a short delay
+                setTimeout(() => navigation.navigate('DigestHistory'), 1500);
             } else {
                 throw new Error(result.error);
             }
         } catch (error) {
-            showAlert('Error', 'Gagal membuat test digest: ' + error.message);
+            showToast('error', 'Error', 'Gagal membuat test digest');
         } finally {
             setTesting(false);
         }
