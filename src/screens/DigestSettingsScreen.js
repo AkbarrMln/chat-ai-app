@@ -25,6 +25,11 @@ import {
     registerForPushNotifications,
     getStoredPushToken
 } from '../services/notificationService';
+import {
+    requestNotificationPermission,
+    showBrowserNotification,
+    isBrowserNotificationSupported
+} from '../services/browserNotificationService';
 
 const TOPICS = ['Teknologi', 'Bisnis', 'Olahraga', 'Hiburan', 'Politik', 'Kesehatan', 'Gaming'];
 
@@ -228,9 +233,14 @@ export default function DigestSettingsScreen({ navigation }) {
     const handleTestDigest = async () => {
         setTesting(true);
         try {
-            // Ensure push token exists
+            // Request browser notification permission on web
+            if (Platform.OS === 'web' && isBrowserNotificationSupported()) {
+                await requestNotificationPermission();
+            }
+
+            // Ensure push token exists for native
             let token = pushToken;
-            if (!token) {
+            if (Platform.OS !== 'web' && !token) {
                 token = await registerForPushNotifications();
                 if (token) setPushToken(token);
             }
@@ -238,9 +248,20 @@ export default function DigestSettingsScreen({ navigation }) {
             const result = await testDigest(deviceId, selectedTopic, customPrompt, token);
 
             if (result.success) {
-                showToast('success', '🧪 Test Berhasil!', 'Digest dibuat. Tap untuk lihat history.');
+                showToast('success', '🧪 Test Berhasil!', 'Digest dibuat.');
+
+                // Show browser notification on web after 2 seconds
+                if (Platform.OS === 'web' && isBrowserNotificationSupported()) {
+                    setTimeout(() => {
+                        showBrowserNotification('📰 Daily Digest - ' + selectedTopic, {
+                            body: 'Ringkasan berita terbaru sudah siap! Tap untuk melihat.',
+                            onClick: () => navigation.navigate('DigestHistory')
+                        });
+                    }, 2000);
+                }
+
                 // Navigate to history after a short delay
-                setTimeout(() => navigation.navigate('DigestHistory'), 1500);
+                setTimeout(() => navigation.navigate('DigestHistory'), 3000);
             } else {
                 throw new Error(result.error);
             }
