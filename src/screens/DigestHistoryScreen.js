@@ -55,15 +55,22 @@ export default function DigestHistoryScreen({ navigation }) {
         const now = new Date();
         const diff = now - date;
         const days = Math.floor(diff / (1000 * 60 * 60 * 24));
+        const timeStr = date.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
 
         if (days === 0) {
-            return 'Hari ini ' + date.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
+            return 'Hari ini, ' + timeStr;
         } else if (days === 1) {
-            return 'Kemarin ' + date.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
+            return 'Kemarin, ' + timeStr;
         } else if (days < 7) {
-            return `${days} hari lalu`;
+            return `${days} hari lalu, ${timeStr}`;
         } else {
-            return date.toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' });
+            return date.toLocaleDateString('id-ID', {
+                day: 'numeric',
+                month: 'short',
+                year: 'numeric',
+                hour: '2-digit',
+                minute: '2-digit'
+            });
         }
     };
 
