@@ -1,5 +1,6 @@
 -- Supabase Database Schema for Chat AI App
 -- Run this in Supabase SQL Editor
+-- Safe to run multiple times (idempotent)
 
 -- =====================================================
 -- 1. PROFILES TABLE (linked to auth.users)
@@ -71,17 +72,23 @@ alter table public.room_members enable row level security;
 alter table public.messages enable row level security;
 
 -- =====================================================
--- RLS POLICIES
+-- RLS POLICIES (Drop first, then create)
 -- =====================================================
 
--- Profiles: Public read, self update
+-- Profiles policies
+drop policy if exists "Public profiles are viewable by everyone" on profiles;
+drop policy if exists "Users can update own profile" on profiles;
+
 create policy "Public profiles are viewable by everyone"
   on profiles for select using (true);
 
 create policy "Users can update own profile"
   on profiles for update using (auth.uid() = id);
 
--- Rooms: Only members can view
+-- Rooms policies
+drop policy if exists "Users can view rooms they are member of" on rooms;
+drop policy if exists "Authenticated users can create rooms" on rooms;
+
 create policy "Users can view rooms they are member of"
   on rooms for select using (
     id in (select room_id from room_members where user_id = auth.uid())
@@ -90,7 +97,10 @@ create policy "Users can view rooms they are member of"
 create policy "Authenticated users can create rooms"
   on rooms for insert with check (auth.uid() = created_by);
 
--- Room Members: View if you're in the room
+-- Room Members policies
+drop policy if exists "Users can view room members" on room_members;
+drop policy if exists "Users can join rooms" on room_members;
+
 create policy "Users can view room members"
   on room_members for select using (
     room_id in (select room_id from room_members where user_id = auth.uid())
@@ -99,7 +109,10 @@ create policy "Users can view room members"
 create policy "Users can join rooms"
   on room_members for insert with check (auth.uid() = user_id);
 
--- Messages: Only room members can read/write
+-- Messages policies
+drop policy if exists "Users can read messages in their rooms" on messages;
+drop policy if exists "Users can send messages to their rooms" on messages;
+
 create policy "Users can read messages in their rooms"
   on messages for select using (
     room_id in (select room_id from room_members where user_id = auth.uid())
@@ -112,9 +125,17 @@ create policy "Users can send messages to their rooms"
   );
 
 -- =====================================================
--- ENABLE REALTIME
+-- ENABLE REALTIME (safe to run multiple times)
 -- =====================================================
-alter publication supabase_realtime add table messages;
+do $$
+begin
+  if not exists (
+    select 1 from pg_publication_tables 
+    where pubname = 'supabase_realtime' and tablename = 'messages'
+  ) then
+    alter publication supabase_realtime add table messages;
+  end if;
+end $$;
 
 -- =====================================================
 -- HELPER: Create a room and add creator as member
@@ -139,3 +160,5 @@ begin
   return new_room_id;
 end;
 $$ language plpgsql security definer;
+
+-- Done! ✅

@@ -144,5 +144,9 @@ export function addNotificationResponseListener(callback) {
  * @returns {Promise<Object|null>}
  */
 export async function getLastNotificationResponse() {
+    // Not available on web
+    if (Platform.OS === 'web') {
+        return null;
+    }
     return await Notifications.getLastNotificationResponseAsync();
 }
