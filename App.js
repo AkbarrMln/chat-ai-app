@@ -1,20 +1,25 @@
 import React, { useEffect } from 'react';
 import { StatusBar } from 'expo-status-bar';
-import { View, StyleSheet, Text } from 'react-native';
+import { View, StyleSheet, Text, ActivityIndicator } from 'react-native';
 import { NavigationContainer } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { Ionicons } from '@expo/vector-icons';
 import { ThemeProvider, useTheme } from './src/context/ThemeContext';
 import { ToastProvider } from './src/components/Toast';
+import { AuthProvider, useAuth } from './src/context/AuthContext';
 
-// Screens
+// Main Screens
 import ConversationListScreen from './src/screens/ConversationListScreen';
 import ChatDetailScreen from './src/screens/ChatDetailScreen';
 import ProfileScreen from './src/screens/ProfileScreen';
 import DigestSettingsScreen from './src/screens/DigestSettingsScreen';
 import DigestHistoryScreen from './src/screens/DigestHistoryScreen';
 import DigestDetailScreen from './src/screens/DigestDetailScreen';
+
+// Auth Screens
+import LoginScreen from './src/screens/auth/LoginScreen';
+import RegisterScreen from './src/screens/auth/RegisterScreen';
 
 // Services
 import {
@@ -25,9 +30,27 @@ import {
 
 const Tab = createBottomTabNavigator();
 const Stack = createNativeStackNavigator();
+const AuthStack = createNativeStackNavigator();
 
 // Navigation reference for deep linking
 let navigationRef = null;
+
+// Auth Navigator (Login/Register)
+function AuthNavigator() {
+  const { colors } = useTheme();
+
+  return (
+    <AuthStack.Navigator
+      screenOptions={{
+        headerShown: false,
+        contentStyle: { backgroundColor: colors.background },
+      }}
+    >
+      <AuthStack.Screen name="Login" component={LoginScreen} />
+      <AuthStack.Screen name="Register" component={RegisterScreen} />
+    </AuthStack.Navigator>
+  );
+}
 
 function ChatStack() {
   const { colors } = useTheme();
@@ -167,6 +190,7 @@ function MainTabs() {
 
 function AppContent() {
   const { isDarkMode, colors } = useTheme();
+  const { user, loading } = useAuth();
 
   useEffect(() => {
     // Register for push notifications on app start
@@ -197,12 +221,24 @@ function AppContent() {
     }
   };
 
+  // Show loading screen while checking auth
+  if (loading) {
+    return (
+      <View style={[styles.loadingContainer, { backgroundColor: colors.background }]}>
+        <ActivityIndicator size="large" color={colors.primary} />
+        <Text style={[styles.loadingText, { color: colors.textSecondary }]}>
+          Loading...
+        </Text>
+      </View>
+    );
+  }
+
   return (
     <NavigationContainer
       ref={(ref) => { navigationRef = ref; }}
     >
       <StatusBar style={isDarkMode ? 'light' : 'dark'} />
-      <MainTabs />
+      {user ? <MainTabs /> : <AuthNavigator />}
     </NavigationContainer>
   );
 }
@@ -210,9 +246,23 @@ function AppContent() {
 export default function App() {
   return (
     <ThemeProvider>
-      <ToastProvider>
-        <AppContent />
-      </ToastProvider>
+      <AuthProvider>
+        <ToastProvider>
+          <AppContent />
+        </ToastProvider>
+      </AuthProvider>
     </ThemeProvider>
   );
 }
+
+const styles = StyleSheet.create({
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  loadingText: {
+    marginTop: 16,
+    fontSize: 16,
+  },
+});

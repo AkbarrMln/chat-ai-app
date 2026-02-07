@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
     View,
     Text,
@@ -6,22 +6,49 @@ import {
     TouchableOpacity,
     StyleSheet,
     Switch,
+    ActivityIndicator,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import Animated, { FadeInDown, Layout, FadeIn } from 'react-native-reanimated';
 import { useTheme } from '../context/ThemeContext';
-import { PROFILE_MENU_ITEMS, USER_PROFILE } from '../data/mockData';
+import { useAuth } from '../context/AuthContext';
+import { useToast } from '../components/Toast';
+
+const PROFILE_MENU_ITEMS = [
+    { id: 1, label: 'Edit Profile', icon: 'person-outline', hasArrow: true },
+    { id: 2, label: 'Notifications', icon: 'notifications-outline', hasArrow: true },
+    { id: 3, label: 'Help Center', icon: 'help-circle-outline', hasArrow: true },
+    { id: 4, label: 'About', icon: 'information-circle-outline', hasArrow: true },
+];
 
 export default function ProfileScreen() {
     const { isDarkMode, toggleTheme, colors } = useTheme();
+    const { user, profile, signOut } = useAuth();
+    const { showToast } = useToast();
+    const [loggingOut, setLoggingOut] = useState(false);
 
     const getInitials = (name) => {
-        return name.split(' ').map((n) => n[0]).join('').toUpperCase();
+        if (!name) return '?';
+        return name.split(' ').map((n) => n[0]).join('').toUpperCase().slice(0, 2);
+    };
+
+    const handleLogout = async () => {
+        setLoggingOut(true);
+        try {
+            const { error } = await signOut();
+            if (error) {
+                showToast('error', 'Logout Gagal', error.message);
+            } else {
+                showToast('success', 'Sampai Jumpa! 👋', 'Logout berhasil');
+            }
+        } catch (error) {
+            showToast('error', 'Error', 'Terjadi kesalahan saat logout');
+        } finally {
+            setLoggingOut(false);
+        }
     };
 
     const MenuItem = ({ item, index }) => {
-        const isLogout = item.label === 'Logout';
-
         return (
             <Animated.View
                 entering={FadeInDown.delay(400 + index * 50).duration(400)}
@@ -29,13 +56,13 @@ export default function ProfileScreen() {
             >
                 <TouchableOpacity
                     style={[styles.menuItem, { backgroundColor: colors.surfaceSecondary, borderColor: colors.border }]}
-                    onPress={() => alert(`${item.label} pressed!`)}
+                    onPress={() => showToast('info', item.label, 'Fitur coming soon!')}
                     activeOpacity={0.7}
                 >
-                    <View style={[styles.menuIcon, { backgroundColor: isLogout ? colors.errorBg + '40' : colors.primaryBg }]}>
-                        <Ionicons name={item.icon} size={20} color={isLogout ? colors.error : colors.primary} />
+                    <View style={[styles.menuIcon, { backgroundColor: colors.primaryBg }]}>
+                        <Ionicons name={item.icon} size={20} color={colors.primary} />
                     </View>
-                    <Text style={[styles.menuLabel, { color: isLogout ? colors.error : colors.text }]}>
+                    <Text style={[styles.menuLabel, { color: colors.text }]}>
                         {item.label}
                     </Text>
                     {item.hasArrow && (
@@ -46,32 +73,30 @@ export default function ProfileScreen() {
         );
     };
 
+    // Get display name and email from auth or profile
+    const displayName = profile?.full_name || profile?.username || user?.email?.split('@')[0] || 'User';
+    const displayEmail = user?.email || 'No email';
+
     return (
         <ScrollView
             style={[styles.container, { backgroundColor: colors.background }]}
             showsVerticalScrollIndicator={false}
         >
-            {/* Sokka Profile Header */}
+            {/* Profile Header */}
             <Animated.View
                 entering={FadeInDown.duration(600)}
                 style={styles.headerContainer}
             >
                 <View style={[styles.avatarContainer, { backgroundColor: colors.primary }]}>
-                    <Text style={styles.avatarText}>{getInitials(USER_PROFILE.name)}</Text>
+                    <Text style={styles.avatarText}>{getInitials(displayName)}</Text>
                 </View>
-                <Text style={[styles.userName, { color: colors.text }]}>{USER_PROFILE.name}</Text>
-                <Text style={[styles.userEmail, { color: colors.textSecondary }]}>{USER_PROFILE.email}</Text>
+                <Text style={[styles.userName, { color: colors.text }]}>{displayName}</Text>
+                <Text style={[styles.userEmail, { color: colors.textSecondary }]}>{displayEmail}</Text>
 
-                {/* Sokka Stats Row */}
-                <View style={styles.statsRow}>
-                    <View style={[styles.statCard, { backgroundColor: colors.surfaceSecondary }]}>
-                        <Text style={[styles.statValue, { color: colors.primary }]}>128</Text>
-                        <Text style={[styles.statLabel, { color: colors.textTertiary }]}>Chats</Text>
-                    </View>
-                    <View style={[styles.statCard, { backgroundColor: colors.surfaceSecondary }]}>
-                        <Text style={[styles.statValue, { color: colors.primary }]}>2.5K</Text>
-                        <Text style={[styles.statLabel, { color: colors.textTertiary }]}>Msgs</Text>
-                    </View>
+                {/* Online Status Badge */}
+                <View style={[styles.statusBadge, { backgroundColor: colors.success + '20' }]}>
+                    <View style={[styles.statusDot, { backgroundColor: colors.success }]} />
+                    <Text style={[styles.statusText, { color: colors.success }]}>Online</Text>
                 </View>
             </Animated.View>
 
@@ -98,23 +123,42 @@ export default function ProfileScreen() {
                 />
             </Animated.View>
 
-            {/* Sections */}
+            {/* Menu Items */}
             <Animated.View entering={FadeIn.delay(400).duration(600)} style={styles.menuContainer}>
-                <Text style={[styles.sectionTitle, { color: colors.textTertiary }]}>Account Settings</Text>
-                {PROFILE_MENU_ITEMS.slice(0, 2).map((item, index) => <MenuItem key={item.id} item={item} index={index} />)}
+                <Text style={[styles.sectionTitle, { color: colors.textTertiary }]}>Settings</Text>
+                {PROFILE_MENU_ITEMS.map((item, index) => <MenuItem key={item.id} item={item} index={index} />)}
 
-                <Text style={[styles.sectionTitle, { color: colors.textTertiary, marginTop: 24 }]}>Support & Help</Text>
-                {PROFILE_MENU_ITEMS.slice(2, 5).map((item, index) => <MenuItem key={item.id} item={item} index={index + 2} />)}
-
-                <View style={{ marginTop: 16 }}>
-                    {PROFILE_MENU_ITEMS.slice(5).map((item, index) => <MenuItem key={item.id} item={item} index={index + 5} />)}
-                </View>
+                {/* Logout Button */}
+                <Animated.View
+                    entering={FadeInDown.delay(600).duration(400)}
+                    style={{ marginTop: 16 }}
+                >
+                    <TouchableOpacity
+                        style={[styles.logoutButton, { backgroundColor: colors.error + '15', borderColor: colors.error + '30' }]}
+                        onPress={handleLogout}
+                        disabled={loggingOut}
+                        activeOpacity={0.7}
+                    >
+                        {loggingOut ? (
+                            <ActivityIndicator color={colors.error} />
+                        ) : (
+                            <>
+                                <View style={[styles.menuIcon, { backgroundColor: colors.error + '20' }]}>
+                                    <Ionicons name="log-out-outline" size={20} color={colors.error} />
+                                </View>
+                                <Text style={[styles.menuLabel, { color: colors.error }]}>
+                                    Logout
+                                </Text>
+                            </>
+                        )}
+                    </TouchableOpacity>
+                </Animated.View>
             </Animated.View>
 
             {/* Footer */}
             <View style={styles.footer}>
-                <Text style={[styles.version, { color: colors.textTertiary }]}>Sokka AI Premium v1.0.0</Text>
-                <Text style={[styles.copyright, { color: colors.textTertiary }]}>Crafted with 💙 by Akbar Maulana</Text>
+                <Text style={[styles.version, { color: colors.textTertiary }]}>Akbar AI Chat v2.0.0</Text>
+                <Text style={[styles.copyright, { color: colors.textTertiary }]}>Powered by Supabase 💚</Text>
             </View>
         </ScrollView>
     );
@@ -153,26 +197,24 @@ const styles = StyleSheet.create({
     userEmail: {
         fontSize: 14,
         fontWeight: '500',
-        marginBottom: 24,
+        marginBottom: 16,
     },
-    statsRow: {
+    statusBadge: {
         flexDirection: 'row',
-        gap: 16,
-    },
-    statCard: {
-        width: 100,
-        paddingVertical: 14,
-        borderRadius: 24,
         alignItems: 'center',
+        paddingHorizontal: 12,
+        paddingVertical: 6,
+        borderRadius: 20,
+        gap: 6,
     },
-    statValue: {
-        fontSize: 18,
-        fontWeight: '800',
+    statusDot: {
+        width: 8,
+        height: 8,
+        borderRadius: 4,
     },
-    statLabel: {
+    statusText: {
         fontSize: 12,
         fontWeight: '600',
-        marginTop: 2,
     },
     themeCard: {
         flexDirection: 'row',
@@ -230,6 +272,13 @@ const styles = StyleSheet.create({
         flex: 1,
         fontSize: 16,
         fontWeight: '700',
+    },
+    logoutButton: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        padding: 16,
+        borderRadius: 24,
+        borderWidth: 1,
     },
     footer: {
         alignItems: 'center',

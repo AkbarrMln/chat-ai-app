@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import {
     View,
     Text,
@@ -8,35 +8,111 @@ import {
     StyleSheet,
     KeyboardAvoidingView,
     Platform,
-    Alert,
+    ActivityIndicator,
+    AppState,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import Animated, { FadeInRight, FadeInLeft, Layout, FadeIn } from 'react-native-reanimated';
 import * as Haptics from 'expo-haptics';
 import { useTheme } from '../context/ThemeContext';
-import { sendMessageToAI } from '../services/api';
+import { useAuth } from '../context/AuthContext';
+import { useToast } from '../components/Toast';
+import {
+    subscribeToMessages,
+    subscribeToTyping,
+    sendTypingIndicator,
+    subscribeToPresence,
+    unsubscribeFromRoom,
+    fetchMessages,
+    sendMessage,
+} from '../services/realtimeService';
 
-export default function ChatDetailScreen({ route }) {
-    const { conversationId, title } = route.params;
+export default function ChatDetailScreen({ route, navigation }) {
+    const { roomId, title } = route.params;
     const { colors } = useTheme();
+    const { user, profile } = useAuth();
+    const { showToast } = useToast();
+
     const [messages, setMessages] = useState([]);
     const [inputText, setInputText] = useState('');
-    const [isTyping, setIsTyping] = useState(false);
-    const [isError, setIsError] = useState(false);
-    const flatListRef = useRef(null);
+    const [loading, setLoading] = useState(true);
+    const [sending, setSending] = useState(false);
+    const [typingUsers, setTypingUsers] = useState([]);
+    const [onlineUsers, setOnlineUsers] = useState([]);
 
-    // Add welcome message on first load
+    const flatListRef = useRef(null);
+    const typingTimeout = useRef(null);
+    const appState = useRef(AppState.currentState);
+
+    const username = profile?.username || user?.email?.split('@')[0] || 'User';
+
+    // Load messages and subscribe to realtime
     useEffect(() => {
-        const welcomeMessage = {
-            id: 'welcome',
-            text: `Halo! 👋 Saya Akbar AI, asisten virtual Anda. Ada yang bisa saya bantu hari ini?`,
-            isUser: false,
-            timestamp: new Date(),
+        loadMessages();
+
+        // Subscribe to new messages
+        subscribeToMessages(roomId, (newMessage) => {
+            if (newMessage.user_id !== user?.id) {
+                setMessages(prev => [...prev, newMessage]);
+                Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+            }
+        });
+
+        // Subscribe to typing indicators
+        subscribeToTyping(roomId, (payload) => {
+            if (payload.userId !== user?.id) {
+                if (payload.isTyping) {
+                    setTypingUsers(prev => {
+                        if (!prev.find(u => u.userId === payload.userId)) {
+                            return [...prev, payload];
+                        }
+                        return prev;
+                    });
+                } else {
+                    setTypingUsers(prev => prev.filter(u => u.userId !== payload.userId));
+                }
+            }
+        });
+
+        // Subscribe to presence
+        subscribeToPresence(roomId, user?.id, username, (users) => {
+            setOnlineUsers(users);
+        });
+
+        // Handle app state changes
+        const subscription = AppState.addEventListener('change', handleAppStateChange);
+
+        return () => {
+            // Cleanup channels
+            unsubscribeFromRoom(roomId);
+            subscription.remove();
+            if (typingTimeout.current) clearTimeout(typingTimeout.current);
         };
-        setMessages([welcomeMessage]);
+    }, [roomId]);
+
+    const handleAppStateChange = useCallback(async (nextAppState) => {
+        if (appState.current.match(/inactive|background/) && nextAppState === 'active') {
+            // App came to foreground - refresh messages
+            await loadMessages();
+        }
+        appState.current = nextAppState;
     }, []);
 
-    const formatTime = (date) => {
+    const loadMessages = async () => {
+        try {
+            const { data, error } = await fetchMessages(roomId);
+            if (error) throw error;
+            setMessages(data || []);
+        } catch (error) {
+            console.error('Error loading messages:', error);
+            showToast('error', 'Error', 'Gagal memuat pesan');
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const formatTime = (dateString) => {
+        const date = new Date(dateString);
         return date.toLocaleTimeString('en-US', {
             hour: '2-digit',
             minute: '2-digit',
@@ -44,129 +120,120 @@ export default function ChatDetailScreen({ route }) {
         });
     };
 
-    const handleSend = async () => {
-        if (!inputText.trim()) return;
+    const handleInputChange = (text) => {
+        setInputText(text);
 
-        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-        setIsError(false);
+        // Send typing indicator
+        if (text.trim()) {
+            sendTypingIndicator(roomId, user?.id, username, true);
 
-        const userMessage = {
-            id: Date.now().toString(),
-            text: inputText.trim(),
-            isUser: true,
-            timestamp: new Date(),
-        };
+            // Clear previous timeout
+            if (typingTimeout.current) clearTimeout(typingTimeout.current);
 
-        // Add user message to chat
-        const updatedMessages = [...messages, userMessage];
-        setMessages(updatedMessages);
-        setInputText('');
-        setIsTyping(true);
-
-        // Call AI API
-        const result = await sendMessageToAI(inputText.trim(), updatedMessages);
-
-        setIsTyping(false);
-
-        if (result.success) {
-            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-            const aiResponse = {
-                id: (Date.now() + 1).toString(),
-                text: result.response,
-                isUser: false,
-                timestamp: new Date(),
-            };
-            setMessages((prev) => [...prev, aiResponse]);
+            // Stop typing after 2 seconds of no input
+            typingTimeout.current = setTimeout(() => {
+                sendTypingIndicator(roomId, user?.id, username, false);
+            }, 2000);
         } else {
-            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-            setIsError(true);
-            const errorMessage = {
-                id: (Date.now() + 1).toString(),
-                text: `⚠️ ${result.error}`,
-                isUser: false,
-                timestamp: new Date(),
-                isError: true,
-            };
-            setMessages((prev) => [...prev, errorMessage]);
+            sendTypingIndicator(roomId, user?.id, username, false);
         }
     };
 
-    const handleRetry = () => {
-        // Remove last error message and retry
-        const lastUserMessageIndex = messages.map(m => m.isUser).lastIndexOf(true);
-        if (lastUserMessageIndex >= 0) {
-            const lastUserMessage = messages[lastUserMessageIndex];
-            // Remove error message
-            setMessages(prev => prev.filter(m => !m.isError));
-            setInputText(lastUserMessage.text);
+    const handleSend = async () => {
+        if (!inputText.trim() || sending) return;
+
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+        setSending(true);
+
+        // Stop typing indicator
+        sendTypingIndicator(roomId, user?.id, username, false);
+
+        try {
+            const { data, error } = await sendMessage(roomId, user?.id, inputText.trim());
+
+            if (error) throw error;
+
+            // Add message locally (realtime will also receive it but we filter duplicates)
+            setMessages(prev => [...prev, data]);
+            setInputText('');
+
+            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        } catch (error) {
+            showToast('error', 'Gagal Kirim', error.message);
+            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+        } finally {
+            setSending(false);
         }
     };
 
     const renderMessage = ({ item, index }) => {
-        const isFirst = index === 0 || messages[index - 1].isUser !== item.isUser;
-        const isLast = index === messages.length - 1 || messages[index + 1]?.isUser !== item.isUser;
+        const isUser = item.user_id === user?.id;
+        const isFirst = index === 0 || messages[index - 1]?.user_id !== item.user_id;
+        const isLast = index === messages.length - 1 || messages[index + 1]?.user_id !== item.user_id;
+
+        const senderName = item.profiles?.full_name || item.profiles?.username || 'User';
 
         return (
             <Animated.View
-                entering={item.isUser ? FadeInRight.duration(400) : FadeInLeft.duration(400)}
+                entering={isUser ? FadeInRight.duration(400) : FadeInLeft.duration(400)}
                 layout={Layout.springify()}
                 style={[
                     styles.messageRow,
-                    item.isUser ? styles.userRow : styles.aiRow,
+                    isUser ? styles.userRow : styles.aiRow,
                     isFirst && { marginTop: 16 },
                 ]}
             >
-                {!item.isUser && isFirst && (
-                    <View style={[styles.aiAvatar, { backgroundColor: item.isError ? '#EF4444' : (route.params?.avatarColor || colors.primary) }]}>
-                        <Text style={styles.aiInitials}>{item.isError ? '!' : (route.params?.avatar || 'AI')}</Text>
+                {!isUser && isFirst && (
+                    <View style={[styles.avatar, { backgroundColor: colors.primary }]}>
+                        <Text style={styles.avatarText}>
+                            {senderName.charAt(0).toUpperCase()}
+                        </Text>
                     </View>
                 )}
 
                 <View style={[
                     styles.bubble,
-                    item.isUser
+                    isUser
                         ? { backgroundColor: colors.messageUser, borderBottomRightRadius: isLast ? 8 : 32 }
                         : {
-                            backgroundColor: item.isError ? '#FEE2E2' : colors.messageAI,
+                            backgroundColor: colors.messageAI,
                             borderBottomLeftRadius: isLast ? 8 : 32,
                             marginLeft: isFirst ? 0 : 48
                         },
                 ]}>
-                    <Text style={[styles.bubbleText, { color: item.isUser ? colors.messageUserText : (item.isError ? '#991B1B' : colors.messageAIText) }]}>
-                        {item.text}
+                    {!isUser && isFirst && (
+                        <Text style={[styles.senderName, { color: colors.primary }]}>
+                            {senderName}
+                        </Text>
+                    )}
+                    <Text style={[styles.bubbleText, { color: isUser ? colors.messageUserText : colors.messageAIText }]}>
+                        {item.content}
                     </Text>
                     <View style={styles.bubbleFooter}>
-                        <Text style={[styles.bubbleTime, { color: item.isUser ? 'rgba(255,255,255,0.7)' : colors.textTertiary }]}>
-                            {formatTime(item.timestamp)}
+                        <Text style={[styles.bubbleTime, { color: isUser ? 'rgba(255,255,255,0.7)' : colors.textTertiary }]}>
+                            {formatTime(item.created_at)}
                         </Text>
-                        {item.isUser && (
+                        {isUser && (
                             <Ionicons name="checkmark-done" size={14} color="rgba(255,255,255,0.7)" style={{ marginLeft: 4 }} />
                         )}
                     </View>
                 </View>
-
-                {item.isError && (
-                    <TouchableOpacity
-                        style={styles.retryButton}
-                        onPress={handleRetry}
-                    >
-                        <Ionicons name="refresh" size={20} color={colors.primary} />
-                    </TouchableOpacity>
-                )}
             </Animated.View>
         );
     };
 
-    const renderTyping = () => {
-        if (!isTyping) return null;
+    const renderTypingIndicator = () => {
+        if (typingUsers.length === 0) return null;
+
+        const typingNames = typingUsers.map(u => u.username).join(', ');
 
         return (
             <Animated.View
                 entering={FadeInLeft.duration(400)}
                 style={[styles.messageRow, styles.aiRow, { marginTop: 16 }]}
             >
-                <View style={[styles.aiAvatar, { backgroundColor: colors.primary }]}>
-                    <Text style={styles.aiInitials}>AI</Text>
+                <View style={[styles.avatar, { backgroundColor: colors.primary }]}>
+                    <Ionicons name="ellipsis-horizontal" size={16} color="#FFF" />
                 </View>
                 <View style={[styles.typingBubble, { backgroundColor: colors.messageAI }]}>
                     <View style={styles.typingDots}>
@@ -178,12 +245,38 @@ export default function ChatDetailScreen({ route }) {
                         ))}
                     </View>
                     <Text style={[styles.typingText, { color: colors.textTertiary }]}>
-                        Akbar AI sedang mengetik...
+                        {typingNames} sedang mengetik...
                     </Text>
                 </View>
             </Animated.View>
         );
     };
+
+    // Update header with online count
+    useEffect(() => {
+        navigation.setOptions({
+            title: title,
+            headerRight: () => (
+                <View style={styles.headerRight}>
+                    <View style={[styles.onlineBadge, { backgroundColor: '#4ADE8020' }]}>
+                        <View style={styles.onlineDot} />
+                        <Text style={styles.onlineCount}>{onlineUsers.length}</Text>
+                    </View>
+                </View>
+            ),
+        });
+    }, [onlineUsers, title]);
+
+    if (loading) {
+        return (
+            <View style={[styles.loadingContainer, { backgroundColor: colors.background }]}>
+                <ActivityIndicator size="large" color={colors.primary} />
+                <Text style={[styles.loadingText, { color: colors.textSecondary }]}>
+                    Memuat pesan...
+                </Text>
+            </View>
+        );
+    }
 
     return (
         <KeyboardAvoidingView
@@ -191,6 +284,15 @@ export default function ChatDetailScreen({ route }) {
             behavior={Platform.OS === 'ios' ? 'padding' : undefined}
             keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
         >
+            {/* Online Users Bar */}
+            {onlineUsers.length > 0 && (
+                <Animated.View entering={FadeIn.duration(300)} style={[styles.onlineBar, { backgroundColor: colors.surfaceSecondary }]}>
+                    <Text style={[styles.onlineBarText, { color: colors.textSecondary }]}>
+                        🟢 {onlineUsers.length} online: {onlineUsers.map(u => u.username).join(', ')}
+                    </Text>
+                </Animated.View>
+            )}
+
             <FlatList
                 ref={flatListRef}
                 data={messages}
@@ -199,31 +301,39 @@ export default function ChatDetailScreen({ route }) {
                 contentContainerStyle={styles.list}
                 showsVerticalScrollIndicator={false}
                 onContentSizeChange={() => flatListRef.current?.scrollToEnd({ animated: true })}
-                ListFooterComponent={renderTyping}
+                ListFooterComponent={renderTypingIndicator}
+                ListEmptyComponent={
+                    <View style={styles.emptyContainer}>
+                        <Ionicons name="chatbubbles-outline" size={48} color={colors.textTertiary} />
+                        <Text style={[styles.emptyText, { color: colors.textSecondary }]}>
+                            Mulai percakapan!
+                        </Text>
+                    </View>
+                }
             />
 
             <View style={[styles.inputArea, { backgroundColor: colors.background }]}>
                 <View style={[styles.inputWrapper, { backgroundColor: colors.surfaceSecondary, borderColor: colors.border }]}>
                     <TextInput
                         style={[styles.input, { color: colors.text }]}
-                        placeholder="Tanya Akbar AI apa saja..."
+                        placeholder="Ketik pesan..."
                         placeholderTextColor={colors.textTertiary}
                         value={inputText}
-                        onChangeText={setInputText}
+                        onChangeText={handleInputChange}
                         multiline
                         maxLength={1000}
-                        editable={!isTyping}
+                        editable={!sending}
                     />
                     <TouchableOpacity
                         style={[
                             styles.sendBtn,
-                            { backgroundColor: inputText.trim() && !isTyping ? colors.primary : colors.textTertiary + '20' }
+                            { backgroundColor: inputText.trim() && !sending ? colors.primary : colors.textTertiary + '20' }
                         ]}
                         onPress={handleSend}
-                        disabled={!inputText.trim() || isTyping}
+                        disabled={!inputText.trim() || sending}
                     >
-                        {isTyping ? (
-                            <Ionicons name="hourglass-outline" size={24} color={colors.textTertiary} />
+                        {sending ? (
+                            <ActivityIndicator color={colors.textTertiary} size="small" />
                         ) : (
                             <Ionicons name="arrow-up" size={24} color={inputText.trim() ? '#FFF' : colors.textTertiary} />
                         )}
@@ -236,11 +346,49 @@ export default function ChatDetailScreen({ route }) {
 
 const styles = StyleSheet.create({
     container: { flex: 1 },
+    loadingContainer: {
+        flex: 1,
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
+    loadingText: {
+        marginTop: 16,
+        fontSize: 16,
+    },
+    headerRight: {
+        marginRight: 8,
+    },
+    onlineBadge: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        paddingHorizontal: 10,
+        paddingVertical: 4,
+        borderRadius: 12,
+        gap: 4,
+    },
+    onlineDot: {
+        width: 8,
+        height: 8,
+        borderRadius: 4,
+        backgroundColor: '#4ADE80',
+    },
+    onlineCount: {
+        color: '#4ADE80',
+        fontSize: 12,
+        fontWeight: '600',
+    },
+    onlineBar: {
+        paddingHorizontal: 16,
+        paddingVertical: 8,
+    },
+    onlineBarText: {
+        fontSize: 12,
+    },
     list: { padding: 24, paddingBottom: 16 },
     messageRow: { flexDirection: 'row', marginBottom: 6, alignItems: 'flex-end' },
     userRow: { justifyContent: 'flex-end' },
     aiRow: { justifyContent: 'flex-start' },
-    aiAvatar: {
+    avatar: {
         width: 38,
         height: 38,
         borderRadius: 14,
@@ -248,12 +396,17 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         marginRight: 10,
     },
-    aiInitials: { fontSize: 14, fontWeight: '800', color: '#FFF' },
+    avatarText: { fontSize: 14, fontWeight: '800', color: '#FFF' },
     bubble: {
         maxWidth: '82%',
         paddingHorizontal: 20,
         paddingVertical: 16,
         borderRadius: 32,
+    },
+    senderName: {
+        fontSize: 12,
+        fontWeight: '700',
+        marginBottom: 4,
     },
     bubbleText: { fontSize: 16, lineHeight: 24, fontWeight: '500' },
     bubbleFooter: { flexDirection: 'row', alignItems: 'center', marginTop: 8, alignSelf: 'flex-end' },
@@ -271,9 +424,13 @@ const styles = StyleSheet.create({
         marginTop: 8,
         fontStyle: 'italic'
     },
-    retryButton: {
-        marginLeft: 8,
-        padding: 8,
+    emptyContainer: {
+        alignItems: 'center',
+        paddingTop: 60,
+    },
+    emptyText: {
+        marginTop: 12,
+        fontSize: 14,
     },
     inputArea: {
         paddingHorizontal: 20,

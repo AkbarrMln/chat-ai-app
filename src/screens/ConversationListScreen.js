@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import {
     View,
     Text,
@@ -8,31 +8,87 @@ import {
     RefreshControl,
     TextInput,
     StatusBar,
-    ScrollView,
+    Modal,
+    ActivityIndicator,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import Animated, { FadeInDown, Layout, FadeIn } from 'react-native-reanimated';
 import * as Haptics from 'expo-haptics';
 import { useTheme } from '../context/ThemeContext';
-import { CONVERSATIONS, CATEGORIES } from '../data/mockData';
+import { useAuth } from '../context/AuthContext';
+import { useToast } from '../components/Toast';
+import { fetchUserRooms, createRoom } from '../services/realtimeService';
 
 export default function ConversationListScreen({ navigation }) {
     const { colors } = useTheme();
-    const [conversations, setConversations] = useState(CONVERSATIONS);
-    const [refreshing, setRefreshing] = useState(false);
-    const [searchQuery, setSearchQuery] = useState('');
-    const [selectedCategory, setSelectedCategory] = useState('All');
+    const { user, profile } = useAuth();
+    const { showToast } = useToast();
 
-    const onRefresh = useCallback(() => {
-        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-        setRefreshing(true);
-        setTimeout(() => {
-            setConversations([...CONVERSATIONS]);
-            setRefreshing(false);
-        }, 1500);
+    const [rooms, setRooms] = useState([]);
+    const [refreshing, setRefreshing] = useState(false);
+    const [loading, setLoading] = useState(true);
+    const [searchQuery, setSearchQuery] = useState('');
+    const [showCreateModal, setShowCreateModal] = useState(false);
+    const [newRoomName, setNewRoomName] = useState('');
+    const [creating, setCreating] = useState(false);
+
+    // Load rooms on mount
+    useEffect(() => {
+        loadRooms();
     }, []);
 
-    const formatTime = (date) => {
+    const loadRooms = async () => {
+        try {
+            const { data, error } = await fetchUserRooms();
+            if (error) throw error;
+            setRooms(data || []);
+        } catch (error) {
+            console.error('Error loading rooms:', error);
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const onRefresh = useCallback(async () => {
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+        setRefreshing(true);
+        await loadRooms();
+        setRefreshing(false);
+    }, []);
+
+    const handleCreateRoom = async () => {
+        if (!newRoomName.trim()) {
+            showToast('warning', 'Nama room diperlukan', 'Masukkan nama untuk room baru');
+            return;
+        }
+
+        setCreating(true);
+        try {
+            const { data, error } = await createRoom(newRoomName.trim());
+            if (error) throw error;
+
+            showToast('success', 'Room Dibuat! 🎉', `Room "${newRoomName}" berhasil dibuat`);
+            setNewRoomName('');
+            setShowCreateModal(false);
+            await loadRooms();
+
+            // Navigate to new room
+            if (data) {
+                navigation.navigate('ChatDetail', {
+                    roomId: data,
+                    title: newRoomName.trim(),
+                });
+            }
+        } catch (error) {
+            showToast('error', 'Gagal membuat room', error.message);
+        } finally {
+            setCreating(false);
+        }
+    };
+
+    const formatTime = (dateString) => {
+        if (!dateString) return '';
+        const date = new Date(dateString);
         const now = new Date();
         const diff = now - date;
         const minutes = Math.floor(diff / 60000);
@@ -51,11 +107,9 @@ export default function ConversationListScreen({ navigation }) {
         });
     }, [navigation]);
 
-    const filteredConversations = conversations.filter(c => {
-        const matchesSearch = c.title.toLowerCase().includes(searchQuery.toLowerCase());
-        const matchesCategory = selectedCategory === 'All' || c.category === selectedCategory;
-        return matchesSearch && matchesCategory;
-    });
+    const filteredRooms = rooms.filter(room =>
+        room?.name?.toLowerCase().includes(searchQuery.toLowerCase())
+    );
 
     const renderItem = ({ item, index }) => (
         <Animated.View
@@ -71,25 +125,23 @@ export default function ConversationListScreen({ navigation }) {
                 onPress={() => {
                     Haptics.selectionAsync();
                     navigation.navigate('ChatDetail', {
-                        conversationId: item.id,
-                        title: item.title,
-                        avatar: item.avatar,
-                        avatarColor: item.avatarColor || colors.primary
+                        roomId: item.id,
+                        title: item.name,
                     });
                 }}
                 activeOpacity={0.7}
             >
                 <View style={[styles.avatar, { backgroundColor: colors.primaryBg }]}>
-                    <Text style={[styles.avatarText, { color: colors.primary }]}>{item.avatar}</Text>
+                    <Ionicons name={item.type === 'direct' ? 'person' : 'people'} size={24} color={colors.primary} />
                 </View>
 
                 <View style={styles.content}>
                     <View style={styles.row}>
                         <Text style={[styles.title, { color: colors.text }]} numberOfLines={1}>
-                            {item.title}
+                            {item.name}
                         </Text>
                         <Text style={[styles.time, { color: colors.textTertiary }]}>
-                            {formatTime(item.timestamp)}
+                            {formatTime(item.created_at)}
                         </Text>
                     </View>
                     <View style={styles.row}>
@@ -97,30 +149,26 @@ export default function ConversationListScreen({ navigation }) {
                             style={[styles.preview, { color: colors.textSecondary }]}
                             numberOfLines={1}
                         >
-                            {item.lastMessage}
+                            {item.type === 'group' ? '👥 Group Chat' : '💬 Direct Message'}
                         </Text>
-                        {item.unread && (
-                            <View style={[styles.unreadBadge, { backgroundColor: colors.primary }]}>
-                                <Text style={styles.unreadCount}>1</Text>
-                            </View>
-                        )}
                     </View>
                 </View>
             </TouchableOpacity>
         </Animated.View>
     );
 
+    const displayName = profile?.full_name || user?.email?.split('@')[0] || 'User';
+
     const HeaderComponent = () => (
         <View style={[styles.headerContainer, { backgroundColor: colors.primary }]}>
             <StatusBar barStyle="light-content" />
             <View style={styles.headerTop}>
                 <View>
-                    <Text style={styles.greetingText}>Hello Akbar Maulana 👋</Text>
-                    <Text style={styles.welcomeText}>AI Chat Assistant</Text>
+                    <Text style={styles.greetingText}>Hello {displayName} 👋</Text>
+                    <Text style={styles.welcomeText}>Real-Time Chat</Text>
                 </View>
                 <TouchableOpacity style={styles.notificationBtn}>
                     <Ionicons name="notifications-outline" size={24} color="#FFF" />
-                    <View style={styles.notifDot} />
                 </TouchableOpacity>
             </View>
 
@@ -129,58 +177,109 @@ export default function ConversationListScreen({ navigation }) {
                     <Ionicons name="search" size={20} color="#95969D" style={styles.searchIcon} />
                     <TextInput
                         style={styles.searchInput}
-                        placeholder="Search conversations..."
+                        placeholder="Search rooms..."
                         placeholderTextColor="#95969D"
                         value={searchQuery}
                         onChangeText={setSearchQuery}
                     />
                 </View>
-                <TouchableOpacity style={styles.filterBtn}>
-                    <Ionicons name="options-outline" size={20} color="#FFF" />
-                </TouchableOpacity>
             </View>
 
-            {/* Category Chips ScrollView */}
-            <ScrollView
-                horizontal
-                showsHorizontalScrollIndicator={false}
-                style={styles.categoryScroll}
-                contentContainerStyle={styles.categoryContent}
-            >
-                {CATEGORIES.map((cat) => (
-                    <TouchableOpacity
-                        key={cat}
-                        onPress={() => {
-                            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                            setSelectedCategory(cat);
-                        }}
-                        style={[
-                            styles.categoryChip,
-                            {
-                                backgroundColor: selectedCategory === cat ? '#FFF' : 'rgba(255, 255, 255, 0.2)',
-                                borderColor: selectedCategory === cat ? '#FFF' : 'rgba(255, 255, 255, 0.3)',
-                                borderWidth: 1
-                            }
-                        ]}
-                    >
-                        <Text style={[
-                            styles.categoryText,
-                            { color: selectedCategory === cat ? colors.primary : '#FFF' }
-                        ]}>
-                            {cat}
-                        </Text>
-                    </TouchableOpacity>
-                ))}
-            </ScrollView>
+            {/* Stats */}
+            <View style={styles.statsContainer}>
+                <View style={styles.statItem}>
+                    <Text style={styles.statValue}>{rooms.length}</Text>
+                    <Text style={styles.statLabel}>Rooms</Text>
+                </View>
+                <View style={styles.statDivider} />
+                <View style={styles.statItem}>
+                    <View style={[styles.onlineDot, { backgroundColor: '#4ADE80' }]} />
+                    <Text style={styles.statLabel}>Online</Text>
+                </View>
+            </View>
         </View>
     );
+
+    const EmptyComponent = () => (
+        <Animated.View entering={FadeIn.delay(300).duration(600)} style={styles.emptyContainer}>
+            <Ionicons name="chatbubbles-outline" size={64} color={colors.textTertiary} />
+            <Text style={[styles.emptyTitle, { color: colors.text }]}>Belum Ada Room</Text>
+            <Text style={[styles.emptySubtitle, { color: colors.textSecondary }]}>
+                Buat room baru untuk mulai chat real-time!
+            </Text>
+        </Animated.View>
+    );
+
+    // Create Room Modal
+    const CreateRoomModal = () => (
+        <Modal
+            visible={showCreateModal}
+            transparent
+            animationType="fade"
+            onRequestClose={() => setShowCreateModal(false)}
+        >
+            <View style={styles.modalOverlay}>
+                <Animated.View
+                    entering={FadeInDown.duration(300)}
+                    style={[styles.modalContent, { backgroundColor: colors.surface }]}
+                >
+                    <Text style={[styles.modalTitle, { color: colors.text }]}>Buat Room Baru</Text>
+
+                    <TextInput
+                        style={[styles.modalInput, {
+                            backgroundColor: colors.surfaceSecondary,
+                            color: colors.text,
+                            borderColor: colors.border
+                        }]}
+                        placeholder="Nama Room"
+                        placeholderTextColor={colors.textTertiary}
+                        value={newRoomName}
+                        onChangeText={setNewRoomName}
+                        autoFocus
+                    />
+
+                    <View style={styles.modalButtons}>
+                        <TouchableOpacity
+                            style={[styles.modalBtn, { backgroundColor: colors.surfaceSecondary }]}
+                            onPress={() => setShowCreateModal(false)}
+                        >
+                            <Text style={[styles.modalBtnText, { color: colors.textSecondary }]}>Batal</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                            style={[styles.modalBtn, { backgroundColor: colors.primary }]}
+                            onPress={handleCreateRoom}
+                            disabled={creating}
+                        >
+                            {creating ? (
+                                <ActivityIndicator color="#FFF" />
+                            ) : (
+                                <Text style={[styles.modalBtnText, { color: '#FFF' }]}>Buat</Text>
+                            )}
+                        </TouchableOpacity>
+                    </View>
+                </Animated.View>
+            </View>
+        </Modal>
+    );
+
+    if (loading) {
+        return (
+            <View style={[styles.loadingContainer, { backgroundColor: colors.background }]}>
+                <ActivityIndicator size="large" color={colors.primary} />
+                <Text style={[styles.loadingText, { color: colors.textSecondary }]}>
+                    Loading rooms...
+                </Text>
+            </View>
+        );
+    }
 
     return (
         <View style={[styles.container, { backgroundColor: colors.background }]}>
             <FlatList
-                data={filteredConversations}
+                data={filteredRooms}
                 renderItem={renderItem}
                 ListHeaderComponent={HeaderComponent}
+                ListEmptyComponent={EmptyComponent}
                 keyExtractor={(item) => item.id}
                 contentContainerStyle={styles.list}
                 showsVerticalScrollIndicator={false}
@@ -194,21 +293,19 @@ export default function ConversationListScreen({ navigation }) {
                 }
             />
 
+            {/* FAB - Create Room */}
             <TouchableOpacity
                 style={[styles.fab, { backgroundColor: colors.primary }]}
                 onPress={() => {
                     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-                    navigation.navigate('ChatDetail', {
-                        conversationId: `new-${Date.now()}`,
-                        title: 'Akbar AI',
-                        avatar: '🤖',
-                        avatarColor: colors.primary
-                    });
+                    setShowCreateModal(true);
                 }}
                 activeOpacity={0.8}
             >
                 <Ionicons name="add" size={28} color="#FFF" />
             </TouchableOpacity>
+
+            <CreateRoomModal />
         </View>
     );
 }
@@ -216,6 +313,15 @@ export default function ConversationListScreen({ navigation }) {
 const styles = StyleSheet.create({
     container: {
         flex: 1,
+    },
+    loadingContainer: {
+        flex: 1,
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
+    loadingText: {
+        marginTop: 16,
+        fontSize: 16,
     },
     headerContainer: {
         paddingTop: 60,
@@ -249,25 +355,11 @@ const styles = StyleSheet.create({
         justifyContent: 'center',
         alignItems: 'center',
     },
-    notifDot: {
-        position: 'absolute',
-        top: 12,
-        right: 12,
-        width: 8,
-        height: 8,
-        borderRadius: 4,
-        backgroundColor: '#FF9228',
-        borderWidth: 1.5,
-        borderColor: '#356899',
-    },
     searchContainer: {
-        flexDirection: 'row',
-        gap: 12,
         paddingHorizontal: 24,
         marginBottom: 20,
     },
     searchWrapper: {
-        flex: 1,
         flexDirection: 'row',
         alignItems: 'center',
         backgroundColor: '#FFF',
@@ -283,30 +375,36 @@ const styles = StyleSheet.create({
         fontSize: 14,
         color: '#150B3D',
     },
-    filterBtn: {
-        width: 48,
-        height: 48,
-        borderRadius: 12,
-        backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    statsContainer: {
+        flexDirection: 'row',
         justifyContent: 'center',
         alignItems: 'center',
-    },
-    categoryScroll: {
-        marginTop: 4,
-    },
-    categoryContent: {
         paddingHorizontal: 24,
-        gap: 10,
-        flexDirection: 'row', // Explicitly ensure row for web/native consistency
+        gap: 24,
     },
-    categoryChip: {
-        paddingHorizontal: 16,
-        paddingVertical: 8,
-        borderRadius: 12,
+    statItem: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 8,
     },
-    categoryText: {
-        fontSize: 13,
+    statValue: {
+        color: '#FFF',
+        fontSize: 18,
         fontWeight: '700',
+    },
+    statLabel: {
+        color: 'rgba(255, 255, 255, 0.8)',
+        fontSize: 14,
+    },
+    statDivider: {
+        width: 1,
+        height: 24,
+        backgroundColor: 'rgba(255, 255, 255, 0.3)',
+    },
+    onlineDot: {
+        width: 10,
+        height: 10,
+        borderRadius: 5,
     },
     list: {
         paddingBottom: 100,
@@ -331,10 +429,6 @@ const styles = StyleSheet.create({
         justifyContent: 'center',
         alignItems: 'center',
     },
-    avatarText: {
-        fontSize: 16,
-        fontWeight: '700',
-    },
     content: {
         flex: 1,
         marginLeft: 16,
@@ -348,6 +442,7 @@ const styles = StyleSheet.create({
         fontSize: 16,
         fontWeight: '700',
         marginBottom: 2,
+        flex: 1,
     },
     time: {
         fontSize: 12,
@@ -356,19 +451,22 @@ const styles = StyleSheet.create({
     preview: {
         fontSize: 13,
         flex: 1,
-        marginRight: 8,
     },
-    unreadBadge: {
-        paddingHorizontal: 6,
-        paddingVertical: 2,
-        borderRadius: 8,
-        minWidth: 20,
+    emptyContainer: {
         alignItems: 'center',
+        justifyContent: 'center',
+        paddingTop: 80,
+        paddingHorizontal: 40,
     },
-    unreadCount: {
-        color: '#FFFFFF',
-        fontSize: 10,
+    emptyTitle: {
+        fontSize: 18,
         fontWeight: '700',
+        marginTop: 16,
+    },
+    emptySubtitle: {
+        fontSize: 14,
+        textAlign: 'center',
+        marginTop: 8,
     },
     fab: {
         position: 'absolute',
@@ -379,10 +477,51 @@ const styles = StyleSheet.create({
         borderRadius: 30,
         justifyContent: 'center',
         alignItems: 'center',
-        shadowColor: '#356899',
         shadowOffset: { width: 0, height: 10 },
         shadowOpacity: 0.3,
         shadowRadius: 10,
         elevation: 10,
+    },
+    modalOverlay: {
+        flex: 1,
+        backgroundColor: 'rgba(0, 0, 0, 0.5)',
+        justifyContent: 'center',
+        alignItems: 'center',
+        padding: 24,
+    },
+    modalContent: {
+        width: '100%',
+        maxWidth: 400,
+        borderRadius: 24,
+        padding: 24,
+    },
+    modalTitle: {
+        fontSize: 20,
+        fontWeight: '700',
+        marginBottom: 20,
+        textAlign: 'center',
+    },
+    modalInput: {
+        height: 56,
+        borderRadius: 12,
+        paddingHorizontal: 16,
+        fontSize: 16,
+        borderWidth: 1,
+        marginBottom: 20,
+    },
+    modalButtons: {
+        flexDirection: 'row',
+        gap: 12,
+    },
+    modalBtn: {
+        flex: 1,
+        height: 48,
+        borderRadius: 12,
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
+    modalBtnText: {
+        fontSize: 16,
+        fontWeight: '600',
     },
 });
