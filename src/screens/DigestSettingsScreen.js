@@ -28,6 +28,27 @@ import {
 
 const TOPICS = ['Teknologi', 'Bisnis', 'Olahraga', 'Hiburan', 'Politik', 'Kesehatan', 'Gaming'];
 
+// Cross-platform alert function (works on web too)
+const showAlert = (title, message, buttons = []) => {
+    if (Platform.OS === 'web') {
+        // For web, use window.alert or confirm
+        if (buttons.length > 1) {
+            const result = window.confirm(`${title}\n\n${message}`);
+            if (result && buttons[0]?.onPress) {
+                buttons[0].onPress();
+            }
+        } else {
+            window.alert(`${title}\n\n${message}`);
+            if (buttons[0]?.onPress) {
+                buttons[0].onPress();
+            }
+        }
+    } else {
+        // For native, use Alert.alert
+        showAlert(title, message, buttons);
+    }
+};
+
 // Generate hour and minute options
 const HOURS = Array.from({ length: 24 }, (_, i) => i);
 const MINUTES = [0, 15, 30, 45]; // 15-minute intervals
@@ -193,7 +214,7 @@ export default function DigestSettingsScreen({ navigation }) {
             if (enabled && !pushToken) {
                 const token = await registerForPushNotifications();
                 if (!token) {
-                    Alert.alert(
+                    showAlert(
                         'Notifikasi Diperlukan',
                         'Aktifkan izin notifikasi untuk menerima Daily Digest'
                     );
@@ -216,12 +237,12 @@ export default function DigestSettingsScreen({ navigation }) {
             });
 
             if (result.success) {
-                Alert.alert('Berhasil', 'Pengaturan digest berhasil disimpan! 🎉');
+                showAlert('Berhasil', 'Pengaturan digest berhasil disimpan! 🎉');
             } else {
                 throw new Error(result.error);
             }
         } catch (error) {
-            Alert.alert('Error', 'Gagal menyimpan pengaturan: ' + error.message);
+            showAlert('Error', 'Gagal menyimpan pengaturan: ' + error.message);
         } finally {
             setSaving(false);
         }
@@ -240,7 +261,7 @@ export default function DigestSettingsScreen({ navigation }) {
             const result = await testDigest(deviceId, selectedTopic, customPrompt, token);
 
             if (result.success) {
-                Alert.alert(
+                showAlert(
                     '🧪 Test Digest Berhasil!',
                     'Digest telah dibuat. Cek History untuk melihat hasilnya.',
                     [
@@ -252,7 +273,7 @@ export default function DigestSettingsScreen({ navigation }) {
                 throw new Error(result.error);
             }
         } catch (error) {
-            Alert.alert('Error', 'Gagal membuat test digest: ' + error.message);
+            showAlert('Error', 'Gagal membuat test digest: ' + error.message);
         } finally {
             setTesting(false);
         }
