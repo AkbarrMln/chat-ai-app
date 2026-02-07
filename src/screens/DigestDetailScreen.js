@@ -7,6 +7,7 @@ import {
     ActivityIndicator,
     Share,
     TouchableOpacity,
+    Linking,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import Animated, { FadeInDown } from 'react-native-reanimated';
@@ -66,12 +67,35 @@ export default function DigestDetailScreen({ route }) {
         if (!digest) return;
 
         try {
+            let shareContent = `📰 Daily Digest: ${digest.topic}\n\n${digest.content}`;
+
+            // Add sources to share content
+            if (digest.sources && digest.sources.length > 0) {
+                shareContent += '\n\n📚 Sumber:\n';
+                digest.sources.forEach((source, i) => {
+                    shareContent += `${i + 1}. ${source.title}: ${source.url}\n`;
+                });
+            }
+
+            shareContent += '\n— Dibuat dengan Akbar AI';
+
             await Share.share({
-                message: `📰 Daily Digest: ${digest.topic}\n\n${digest.content}\n\n— Dibuat dengan Akbar AI`,
+                message: shareContent,
                 title: `Daily Digest - ${digest.topic}`,
             });
         } catch (error) {
             console.error('Error sharing:', error);
+        }
+    };
+
+    const openSource = async (url) => {
+        try {
+            const supported = await Linking.canOpenURL(url);
+            if (supported) {
+                await Linking.openURL(url);
+            }
+        } catch (error) {
+            console.error('Error opening URL:', error);
         }
     };
 
@@ -179,6 +203,36 @@ export default function DigestDetailScreen({ route }) {
                 {renderContent(digest.content)}
             </Animated.View>
 
+            {/* Sources Section */}
+            {digest.sources && digest.sources.length > 0 && (
+                <Animated.View
+                    entering={FadeInDown.delay(150).duration(600)}
+                    style={[styles.sourcesCard, { backgroundColor: colors.surfaceSecondary, borderColor: colors.border }]}
+                >
+                    <View style={styles.sourcesHeader}>
+                        <Ionicons name="library" size={20} color={colors.primary} />
+                        <Text style={[styles.sourcesTitle, { color: colors.text }]}>
+                            Sumber Berita ({digest.sources.length})
+                        </Text>
+                    </View>
+                    {digest.sources.map((source, index) => (
+                        <TouchableOpacity
+                            key={index}
+                            style={[styles.sourceItem, { backgroundColor: colors.background, borderColor: colors.border }]}
+                            onPress={() => openSource(source.url)}
+                        >
+                            <View style={styles.sourceInfo}>
+                                <Ionicons name="link" size={16} color={colors.primary} />
+                                <Text style={[styles.sourceTitle, { color: colors.text }]} numberOfLines={1}>
+                                    {source.title || `Sumber ${index + 1}`}
+                                </Text>
+                            </View>
+                            <Ionicons name="open-outline" size={16} color={colors.textTertiary} />
+                        </TouchableOpacity>
+                    ))}
+                </Animated.View>
+            )}
+
             {/* Share Button */}
             <Animated.View entering={FadeInDown.delay(200).duration(600)} style={styles.actionContainer}>
                 <TouchableOpacity
@@ -260,6 +314,43 @@ const styles = StyleSheet.create({
         flex: 1,
         fontSize: 15,
         lineHeight: 22,
+    },
+    // Sources section
+    sourcesCard: {
+        marginHorizontal: 16,
+        marginTop: 16,
+        padding: 16,
+        borderRadius: 20,
+        borderWidth: 1,
+    },
+    sourcesHeader: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 8,
+        marginBottom: 12,
+    },
+    sourcesTitle: {
+        fontSize: 16,
+        fontWeight: '700',
+    },
+    sourceItem: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        padding: 12,
+        borderRadius: 12,
+        marginBottom: 8,
+        borderWidth: 1,
+    },
+    sourceInfo: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 8,
+        flex: 1,
+    },
+    sourceTitle: {
+        fontSize: 14,
+        flex: 1,
     },
     actionContainer: {
         padding: 16,

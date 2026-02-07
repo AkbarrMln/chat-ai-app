@@ -104,9 +104,10 @@ function getUsersForDigestAtHour(hour) {
  * @param {string} deviceId - Device identifier
  * @param {string} content - Digest content
  * @param {string} topic - Topic of digest
+ * @param {Array} sources - Array of sources [{title, url}]
  * @returns {Object} The created digest entry
  */
-function addDigestToHistory(deviceId, content, topic) {
+function addDigestToHistory(deviceId, content, topic, sources = []) {
     if (!store.digestHistory[deviceId]) {
         store.digestHistory[deviceId] = [];
     }
@@ -115,6 +116,7 @@ function addDigestToHistory(deviceId, content, topic) {
         id: uuidv4(),
         content: content,
         topic: topic,
+        sources: sources, // Store the sources!
         createdAt: new Date().toISOString()
     };
 

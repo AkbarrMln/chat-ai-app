@@ -22,8 +22,8 @@ async function processUserDigest(deviceId, settings) {
             return;
         }
 
-        // Save to history
-        const digest = addDigestToHistory(deviceId, result.content, settings.topic);
+        // Save to history (including sources from Google Grounding)
+        const digest = addDigestToHistory(deviceId, result.content, settings.topic, result.sources || []);
 
         // Extract first line as preview
         const firstLine = result.content.split('\n').find(line => line.trim()) || 'Berita terbaru untuk kamu!';
@@ -122,8 +122,8 @@ async function triggerManualDigest(deviceId, topic, customPrompt = '', pushToken
         };
     }
 
-    // Save to history
-    const digest = addDigestToHistory(deviceId, result.content, topic);
+    // Save to history (including sources from Google Grounding)
+    const digest = addDigestToHistory(deviceId, result.content, topic, result.sources || []);
 
     // Send push notification if token provided
     if (pushToken) {

@@ -15,18 +15,73 @@ const TOPICS = {
 };
 
 /**
+ * Extract sources from Google Grounding response
+ * @param {object} response - Gemini API response
+ * @returns {Array} Array of source objects {title, url}
+ */
+function extractSources(response) {
+    const sources = [];
+
+    try {
+        // Try to get grounding metadata from response
+        const groundingMetadata = response.candidates?.[0]?.groundingMetadata;
+
+        if (groundingMetadata?.groundingChunks) {
+            for (const chunk of groundingMetadata.groundingChunks) {
+                if (chunk.web) {
+                    sources.push({
+                        title: chunk.web.title || 'Sumber Berita',
+                        url: chunk.web.uri || ''
+                    });
+                }
+            }
+        }
+
+        // Also check searchEntryPoint for web sources
+        if (groundingMetadata?.webSearchQueries) {
+            // Log the queries used for transparency
+            console.log('📚 Search queries used:', groundingMetadata.webSearchQueries);
+        }
+
+        // If no sources found in metadata, try to extract from content
+        if (sources.length === 0) {
+            const content = response.text || '';
+            // Look for common source patterns in the text
+            const urlPattern = /https?:\/\/[^\s)]+/g;
+            const urls = content.match(urlPattern) || [];
+
+            urls.forEach((url, index) => {
+                sources.push({
+                    title: `Sumber ${index + 1}`,
+                    url: url
+                });
+            });
+        }
+    } catch (error) {
+        console.log('Could not extract sources:', error.message);
+    }
+
+    // Remove duplicates and limit to 10 sources
+    const uniqueSources = sources.filter((source, index, self) =>
+        index === self.findIndex(s => s.url === source.url)
+    ).slice(0, 10);
+
+    return uniqueSources;
+}
+
+/**
  * Generate a news digest using Gemini with Google Grounding
  * @param {string} topic - The topic to generate digest for
  * @param {string} customPrompt - Optional custom prompt from user
- * @returns {Promise<{success: boolean, content?: string, error?: string}>}
+ * @returns {Promise<{success: boolean, content?: string, sources?: array, error?: string}>}
  */
 async function generateDigest(topic, customPrompt = '') {
     try {
         const topicContext = TOPICS[topic] || topic;
 
-        // Build the prompt
+        // Build the prompt - ask Gemini to include sources
         let prompt = customPrompt
-            ? `${customPrompt}\n\nFokus pada: ${topicContext}`
+            ? `${customPrompt}\n\nFokus pada: ${topicContext}\n\nSertakan sumber berita jika tersedia.`
             : `Berikan ringkasan berita terkini hari ini tentang ${topicContext}. 
                
                Format respons:
@@ -35,7 +90,9 @@ async function generateDigest(topic, customPrompt = '') {
                Berikan 3-5 berita paling penting dengan:
                - Judul berita
                - Ringkasan singkat (2-3 kalimat)
-               - Sumber jika tersedia
+               - Sumber/link berita
+               
+               Di akhir, berikan daftar sumber berita yang digunakan.
                
                Gunakan bahasa Indonesia yang mudah dipahami.
                Berikan emoji yang relevan untuk setiap berita.`;
@@ -58,12 +115,17 @@ async function generateDigest(topic, customPrompt = '') {
             throw new Error('No content generated');
         }
 
+        // Extract sources from grounding metadata
+        const sources = extractSources(response);
+
         console.log(`✅ Digest generated successfully for topic: ${topic}`);
+        console.log(`📚 Found ${sources.length} sources`);
 
         return {
             success: true,
             content: content,
-            topic: topic
+            topic: topic,
+            sources: sources
         };
 
     } catch (error) {
