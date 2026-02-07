@@ -8,15 +8,23 @@
     "dev": "node server.js"
   },
   "dependencies": {
-    "@google/generative-ai": "^0.21.0",
+    "@google/genai": "^1.40.0",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
-    "express": "^4.21.0"
+    "expo-server-sdk": "^5.0.0",
+    "express": "^4.21.0",
+    "node-schedule": "^2.1.1",
+    "uuid": "^13.0.0"
   },
   "engines": {
     "node": ">=18.0.0"
   },
-  "keywords": ["chat", "ai", "gemini", "express"],
+  "keywords": [
+    "chat",
+    "ai",
+    "gemini",
+    "express"
+  ],
   "author": "Akbar Maulana",
   "license": "MIT"
 }
