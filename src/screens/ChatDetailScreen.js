@@ -10,6 +10,7 @@ import {
     Platform,
     ActivityIndicator,
     AppState,
+    Alert,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import Animated, { FadeInRight, FadeInLeft, Layout, FadeIn } from 'react-native-reanimated';
@@ -25,7 +26,9 @@ import {
     unsubscribeFromRoom,
     fetchMessages,
     sendMessage,
+    deleteMessage,
 } from '../services/realtimeService';
+import { sendMessageToAI } from '../services/api';
 
 export default function ChatDetailScreen({ route, navigation }) {
     const { roomId, title } = route.params;
@@ -148,22 +151,71 @@ export default function ChatDetailScreen({ route, navigation }) {
         // Stop typing indicator
         sendTypingIndicator(roomId, user?.id, username, false);
 
+        const messageText = inputText.trim();
+        const isAiRequest = messageText.toLowerCase().startsWith('@ai');
+
         try {
-            const { data, error } = await sendMessage(roomId, user?.id, inputText.trim());
+            // Send user message to Supabase
+            const { data, error } = await sendMessage(roomId, user?.id, messageText);
 
             if (error) throw error;
 
-            // Add message locally (realtime will also receive it but we filter duplicates)
+            // Add message locally
             setMessages(prev => [...prev, data]);
             setInputText('');
 
             Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+
+            // If user mentioned @ai, get AI response
+            if (isAiRequest) {
+                // Get the actual question (remove @ai prefix)
+                const aiQuestion = messageText.replace(/^@ai\s*/i, '');
+
+                if (aiQuestion) {
+                    // Build history from last 10 messages
+                    const history = messages.slice(-10).map(m => ({
+                        text: m.content,
+                        isUser: m.user_id === user?.id
+                    }));
+
+                    // Get AI response
+                    const aiResult = await sendMessageToAI(aiQuestion, history);
+
+                    if (aiResult.success && aiResult.response) {
+                        // Send AI response to room as a message
+                        const aiMessageContent = `🤖 **Akbar AI:**\n${aiResult.response}`;
+                        await sendMessage(roomId, user?.id, aiMessageContent, true);
+                    } else {
+                        showToast('warning', 'AI Error', aiResult.error || 'Gagal mendapatkan respons AI');
+                    }
+                }
+            }
         } catch (error) {
             showToast('error', 'Gagal Kirim', error.message);
             Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
         } finally {
             setSending(false);
         }
+    };
+
+    const handleDeleteMessage = (messageId, isUserMessage) => {
+        if (!isUserMessage) {
+            showToast('warning', 'Tidak Bisa', 'Hanya bisa hapus pesan sendiri');
+            return;
+        }
+
+        // Show confirm toast
+        showToast('confirm', 'Hapus Pesan?', 'Pesan akan dihapus permanen', {
+            onConfirm: async () => {
+                const { error } = await deleteMessage(messageId);
+                if (error) {
+                    showToast('error', 'Gagal', 'Tidak bisa menghapus pesan');
+                } else {
+                    setMessages(prev => prev.filter(m => m.id !== messageId));
+                    showToast('success', 'Berhasil', 'Pesan dihapus');
+                }
+            }
+        });
     };
 
     const renderMessage = ({ item, index }) => {
@@ -174,51 +226,65 @@ export default function ChatDetailScreen({ route, navigation }) {
         const senderName = item.profiles?.full_name || item.profiles?.username || 'User';
 
         return (
-            <Animated.View
-                entering={isUser ? FadeInRight.duration(400) : FadeInLeft.duration(400)}
-                layout={Layout.springify()}
-                style={[
-                    styles.messageRow,
-                    isUser ? styles.userRow : styles.aiRow,
-                    isFirst && { marginTop: 16 },
-                ]}
+            <TouchableOpacity
+                activeOpacity={0.8}
+                onLongPress={() => handleDeleteMessage(item.id, isUser)}
+                delayLongPress={500}
             >
-                {!isUser && isFirst && (
-                    <View style={[styles.avatar, { backgroundColor: colors.primary }]}>
-                        <Text style={styles.avatarText}>
-                            {senderName.charAt(0).toUpperCase()}
-                        </Text>
-                    </View>
-                )}
-
-                <View style={[
-                    styles.bubble,
-                    isUser
-                        ? { backgroundColor: colors.messageUser, borderBottomRightRadius: isLast ? 8 : 32 }
-                        : {
-                            backgroundColor: colors.messageAI,
-                            borderBottomLeftRadius: isLast ? 8 : 32,
-                            marginLeft: isFirst ? 0 : 48
-                        },
-                ]}>
+                <Animated.View
+                    entering={isUser ? FadeInRight.duration(400) : FadeInLeft.duration(400)}
+                    layout={Layout.springify()}
+                    style={[
+                        styles.messageRow,
+                        isUser ? styles.userRow : styles.aiRow,
+                        isFirst && { marginTop: 16 },
+                    ]}
+                >
                     {!isUser && isFirst && (
-                        <Text style={[styles.senderName, { color: colors.primary }]}>
-                            {senderName}
-                        </Text>
+                        <View style={[styles.avatar, { backgroundColor: colors.primary }]}>
+                            <Text style={styles.avatarText}>
+                                {senderName.charAt(0).toUpperCase()}
+                            </Text>
+                        </View>
                     )}
-                    <Text style={[styles.bubbleText, { color: isUser ? colors.messageUserText : colors.messageAIText }]}>
-                        {item.content}
-                    </Text>
-                    <View style={styles.bubbleFooter}>
-                        <Text style={[styles.bubbleTime, { color: isUser ? 'rgba(255,255,255,0.7)' : colors.textTertiary }]}>
-                            {formatTime(item.created_at)}
-                        </Text>
-                        {isUser && (
-                            <Ionicons name="checkmark-done" size={14} color="rgba(255,255,255,0.7)" style={{ marginLeft: 4 }} />
+
+                    <View style={[
+                        styles.bubble,
+                        isUser
+                            ? { backgroundColor: colors.messageUser, borderBottomRightRadius: isLast ? 8 : 32 }
+                            : {
+                                backgroundColor: colors.messageAI,
+                                borderBottomLeftRadius: isLast ? 8 : 32,
+                                marginLeft: isFirst ? 0 : 48
+                            },
+                    ]}>
+                        {!isUser && isFirst && (
+                            <Text style={[styles.senderName, { color: colors.primary }]}>
+                                {senderName}
+                            </Text>
                         )}
+                        <Text style={[styles.bubbleText, { color: isUser ? colors.messageUserText : colors.messageAIText }]}>
+                            {item.content}
+                        </Text>
+                        <View style={styles.bubbleFooter}>
+                            <Text style={[styles.bubbleTime, { color: isUser ? 'rgba(255,255,255,0.7)' : colors.textTertiary }]}>
+                                {formatTime(item.created_at)}
+                            </Text>
+                            {isUser && (
+                                <>
+                                    <Ionicons name="checkmark-done" size={14} color="rgba(255,255,255,0.7)" style={{ marginLeft: 4 }} />
+                                    <TouchableOpacity
+                                        onPress={() => handleDeleteMessage(item.id, true)}
+                                        style={{ marginLeft: 8, padding: 2 }}
+                                    >
+                                        <Ionicons name="trash-outline" size={14} color="rgba(255,255,255,0.7)" />
+                                    </TouchableOpacity>
+                                </>
+                            )}
+                        </View>
                     </View>
-                </View>
-            </Animated.View>
+                </Animated.View>
+            </TouchableOpacity>
         );
     };
 

@@ -27,16 +27,21 @@ const TOAST_CONFIG = {
         backgroundColor: '#3B82F6',
         iconColor: '#FFFFFF',
     },
+    confirm: {
+        icon: 'trash',
+        backgroundColor: '#EF4444',
+        iconColor: '#FFFFFF',
+    },
 };
 
 // Toast Component
-function Toast({ visible, type, title, message, onHide }) {
+function Toast({ visible, type, title, message, onHide, onConfirm, onCancel }) {
     const [animation] = useState(new Animated.Value(0));
     const config = TOAST_CONFIG[type] || TOAST_CONFIG.info;
+    const isConfirm = type === 'confirm';
 
     useEffect(() => {
         if (visible) {
-            // Reset and slide in
             animation.setValue(0);
             Animated.spring(animation, {
                 toValue: 1,
@@ -44,12 +49,13 @@ function Toast({ visible, type, title, message, onHide }) {
                 friction: 8,
             }).start();
 
-            // Auto hide after 3 seconds
-            const timer = setTimeout(() => {
-                hideToast();
-            }, 3500);
-
-            return () => clearTimeout(timer);
+            // Auto hide only for non-confirm toasts
+            if (!isConfirm) {
+                const timer = setTimeout(() => {
+                    hideToast();
+                }, 3500);
+                return () => clearTimeout(timer);
+            }
         }
     }, [visible]);
 
@@ -61,6 +67,16 @@ function Toast({ visible, type, title, message, onHide }) {
         }).start(() => {
             if (onHide) onHide();
         });
+    };
+
+    const handleConfirm = () => {
+        hideToast();
+        if (onConfirm) onConfirm();
+    };
+
+    const handleCancel = () => {
+        hideToast();
+        if (onCancel) onCancel();
     };
 
     if (!visible) return null;
@@ -94,10 +110,22 @@ function Toast({ visible, type, title, message, onHide }) {
                         <Text style={styles.toastTitle}>{title}</Text>
                         {message && <Text style={styles.toastMessage}>{message}</Text>}
                     </View>
-                    <TouchableOpacity onPress={hideToast} style={styles.closeButton}>
-                        <Ionicons name="close" size={20} color="#FFFFFF99" />
-                    </TouchableOpacity>
+                    {!isConfirm && (
+                        <TouchableOpacity onPress={hideToast} style={styles.closeButton}>
+                            <Ionicons name="close" size={20} color="#FFFFFF99" />
+                        </TouchableOpacity>
+                    )}
                 </View>
+                {isConfirm && (
+                    <View style={styles.confirmButtons}>
+                        <TouchableOpacity onPress={handleCancel} style={styles.cancelBtn}>
+                            <Text style={styles.cancelBtnText}>Batal</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity onPress={handleConfirm} style={styles.confirmBtn}>
+                            <Text style={styles.confirmBtnText}>Hapus</Text>
+                        </TouchableOpacity>
+                    </View>
+                )}
             </Animated.View>
         </View>
     );
@@ -111,16 +139,19 @@ export function ToastProvider({ children }) {
         title: '',
         message: '',
         key: 0,
+        onConfirm: null,
+        onCancel: null,
     });
 
-    const showToast = (type, title, message = '') => {
-        // Use key to force re-render for new toasts
+    const showToast = (type, title, message = '', callbacks = {}) => {
         setToast(prev => ({
             visible: true,
             type,
             title,
             message,
-            key: prev.key + 1
+            key: prev.key + 1,
+            onConfirm: callbacks.onConfirm || null,
+            onCancel: callbacks.onCancel || null,
         }));
     };
 
@@ -139,6 +170,8 @@ export function ToastProvider({ children }) {
                     title={toast.title}
                     message={toast.message}
                     onHide={hideToast}
+                    onConfirm={toast.onConfirm}
+                    onCancel={toast.onCancel}
                 />
             </View>
         </ToastContext.Provider>
@@ -198,6 +231,35 @@ const styles = StyleSheet.create({
     },
     closeButton: {
         padding: 4,
+    },
+    confirmButtons: {
+        flexDirection: 'row',
+        justifyContent: 'flex-end',
+        paddingHorizontal: 16,
+        paddingBottom: 12,
+        gap: 12,
+    },
+    cancelBtn: {
+        paddingVertical: 8,
+        paddingHorizontal: 16,
+        borderRadius: 8,
+        backgroundColor: 'rgba(255,255,255,0.2)',
+    },
+    cancelBtnText: {
+        color: '#FFFFFF',
+        fontWeight: '600',
+        fontSize: 14,
+    },
+    confirmBtn: {
+        paddingVertical: 8,
+        paddingHorizontal: 16,
+        borderRadius: 8,
+        backgroundColor: '#FFFFFF',
+    },
+    confirmBtnText: {
+        color: '#EF4444',
+        fontWeight: '700',
+        fontSize: 14,
     },
 });
 

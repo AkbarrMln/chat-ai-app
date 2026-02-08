@@ -17,7 +17,7 @@ import * as Haptics from 'expo-haptics';
 import { useTheme } from '../context/ThemeContext';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../components/Toast';
-import { fetchUserRooms, createRoom } from '../services/realtimeService';
+import { fetchUserRooms, createRoom, deleteRoom } from '../services/realtimeService';
 
 export default function ConversationListScreen({ navigation }) {
     const { colors } = useTheme();
@@ -86,6 +86,24 @@ export default function ConversationListScreen({ navigation }) {
         }
     };
 
+    const handleDeleteRoom = (room) => {
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+
+        showToast('confirm', 'Hapus Room?', `Room "${room.name}" akan dihapus permanen beserta semua pesan`, {
+            onConfirm: async () => {
+                try {
+                    const { error } = await deleteRoom(room.id);
+                    if (error) throw error;
+
+                    setRooms(prev => prev.filter(r => r.id !== room.id));
+                    showToast('success', 'Berhasil! 🗑️', `Room "${room.name}" telah dihapus`);
+                } catch (error) {
+                    showToast('error', 'Gagal Hapus', error.message);
+                }
+            }
+        });
+    };
+
     const formatTime = (dateString) => {
         if (!dateString) return '';
         const date = new Date(dateString);
@@ -129,6 +147,8 @@ export default function ConversationListScreen({ navigation }) {
                         title: item.name,
                     });
                 }}
+                onLongPress={() => handleDeleteRoom(item)}
+                delayLongPress={500}
                 activeOpacity={0.7}
             >
                 <View style={[styles.avatar, { backgroundColor: colors.primaryBg }]}>
@@ -151,6 +171,13 @@ export default function ConversationListScreen({ navigation }) {
                         >
                             {item.type === 'group' ? '👥 Group Chat' : '💬 Direct Message'}
                         </Text>
+                        <TouchableOpacity
+                            onPress={() => handleDeleteRoom(item)}
+                            style={styles.deleteBtn}
+                            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                        >
+                            <Ionicons name="trash-outline" size={18} color={colors.textTertiary} />
+                        </TouchableOpacity>
                     </View>
                 </View>
             </TouchableOpacity>
@@ -451,6 +478,10 @@ const styles = StyleSheet.create({
     preview: {
         fontSize: 13,
         flex: 1,
+    },
+    deleteBtn: {
+        padding: 4,
+        marginLeft: 8,
     },
     emptyContainer: {
         alignItems: 'center',

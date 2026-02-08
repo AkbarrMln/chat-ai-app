@@ -164,10 +164,7 @@ export const cleanupAllChannels = () => {
 export const fetchMessages = async (roomId, limit = 50) => {
     const { data, error } = await supabase
         .from('messages')
-        .select(`
-            *,
-            profiles:user_id (username, full_name, avatar_url)
-        `)
+        .select('*')
         .eq('room_id', roomId)
         .order('created_at', { ascending: true })
         .limit(limit);
@@ -259,6 +256,38 @@ export const joinRoom = async (roomId, userId) => {
     return { data, error };
 };
 
+/**
+ * Delete a message
+ */
+export const deleteMessage = async (messageId) => {
+    const { error } = await supabase
+        .from('messages')
+        .delete()
+        .eq('id', messageId);
+
+    if (error) {
+        console.error('Error deleting message:', error);
+    }
+
+    return { error };
+};
+
+/**
+ * Delete a room (and all its messages via cascade)
+ */
+export const deleteRoom = async (roomId) => {
+    const { error } = await supabase
+        .from('rooms')
+        .delete()
+        .eq('id', roomId);
+
+    if (error) {
+        console.error('Error deleting room:', error);
+    }
+
+    return { error };
+};
+
 export default {
     subscribeToMessages,
     subscribeToTyping,
@@ -272,4 +301,6 @@ export default {
     fetchUserRooms,
     createRoom,
     joinRoom,
+    deleteMessage,
+    deleteRoom,
 };

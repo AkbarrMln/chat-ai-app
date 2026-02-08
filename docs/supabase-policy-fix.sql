@@ -46,4 +46,13 @@ create policy "Authenticated can read messages"
 create policy "Users can send messages"
   on messages for insert with check (auth.uid() = user_id);
 
+-- Delete policies
+drop policy if exists "Users can delete own messages" on messages;
+create policy "Users can delete own messages"
+  on messages for delete using (auth.uid() = user_id);
+
+drop policy if exists "Users can delete own rooms" on rooms;
+create policy "Users can delete own rooms"
+  on rooms for delete using (auth.uid() = created_by);
+
 -- Done! ✅

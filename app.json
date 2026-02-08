@@ -41,7 +41,8 @@
           "androidMode": "default",
           "androidCollapsedTitle": "Akbar AI"
         }
-      ]
+      ],
+      "@react-native-community/datetimepicker"
     ],
     "extra": {
       "eas": {
